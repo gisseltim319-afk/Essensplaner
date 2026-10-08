@@ -7,7 +7,7 @@
 <title>Essensplaner</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1F6F5C">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
 <script>
 /* Hier die Werte aus Supabase eintragen: Project Settings > API */
 var SUPABASE_URL="https://vaflwpdwpxkdwvivtuvh.supabase.co";
@@ -65,6 +65,11 @@ main{max-width:1000px;padding:24px 28px 72px}
 #weeklist{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
 #weeklist .card{margin-bottom:0}
 }
+.h2{font-size:1.05rem;margin:18px 0 6px;color:var(--mute)}
+.lnk{background:none;border:0;color:var(--acc);font:inherit;font-size:.85rem;padding:4px 0;cursor:pointer;text-decoration:underline}
+.chip{display:inline-flex;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:2px 2px 2px 12px;margin:3px}
+.chip .x{padding:2px 10px}
+nav button{font-size:.95rem}
 body.out nav,body.out section{display:none!important}
 .err{color:var(--danger);margin:8px 0 0;min-height:1.2em}
 [hidden]{display:none!important}
@@ -79,6 +84,7 @@ body.out nav,body.out section{display:none!important}
 <button role="tab" id="t-dishes" aria-selected="true">Gerichte</button>
 <button role="tab" id="t-week" aria-selected="false">Woche<span class="n" id="cw">0</span></button>
 <button role="tab" id="t-shop" aria-selected="false">Einkauf<span class="n" id="cs">0</span></button>
+<button role="tab" id="t-home" aria-selected="false">Vorrat</button>
 </nav>
 
 <section id="v-dishes">
@@ -108,26 +114,40 @@ body.out nav,body.out section{display:none!important}
 <div class="row"><button class="btn ghost sm" id="clr">Einkauf abschließen</button><button class="btn ghost sm" id="cp">Liste kopieren</button></div>
 <p class="hint">„Einkauf abschließen“ löscht abgehakte eigene Artikel und setzt alle Haken zurück.</p>
 </section>
+<section id="v-home" hidden>
+<div class="card row"><input type="text" id="pi" class="grow" placeholder="Was hast du zuhause? z. B. Nudeln" aria-label="Lebensmittel zuhause" autocomplete="off"><button class="btn" id="padd">Hinzufügen</button></div>
+<div class="card" id="pantry"></div>
+<h2 class="h2">Passende Gerichte</h2>
+<div id="match"></div>
+</section>
 </main>
 <div id="msg" hidden></div>
 
 <script>
 (function(){
 var UNITS=["","g","kg","ml","l","Stk","EL","TL","Pck","Dose","Bund"];
-var dishes=[],manual=[],ist={},db=null,tab="dishes",editId=null,ingRows=[];
+var dishes=[],manual=[],pantry=[],ist={},db=null,tab="dishes",editId=null,ingRows=[];
 function $(i){return document.getElementById(i)}
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function toast(t){var m=$("msg");m.textContent=t;m.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(function(){m.hidden=true},3500)}
 function hash(s){var h=5381;for(var i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;return "k"+(h>>>0).toString(36)}
+function norm(x){return String(x).toLowerCase().trim()}
+function mt(a,b){a=norm(a);b=norm(b);if(!a||!b)return false;return a===b||(b.length>=3&&a.indexOf(b)>=0)||(a.length>=3&&b.indexOf(a)>=0)}
+function have(n){return pantry.some(function(p){return mt(n,p.name)})}
+function addPantry(name){name=name.trim();if(!name||!db)return;if(pantry.some(function(p){return norm(p.name)===norm(name)}))return;guard(db.collection("pantry").add({name:name}))}
+function itemById(id){return allItems().filter(function(x){return x.kind==="d"&&x.id===id})[0]}
+function toPantry(id){var it=itemById(id);if(it)addPantry(it.n)}
+function outPantry(id){var it=itemById(id);if(it)pantry.filter(function(p){return mt(it.n,p.name)}).forEach(function(p){guard(db.collection("pantry").doc(p.id).delete())})}
 function num(v){var x=parseFloat(String(v).replace(",","."));return isFinite(x)?x:null}
 function fq(q){return String(Math.round(q*100)/100).replace(".",",")}
 function stepFor(u){return u==="g"||u==="ml"?50:(u==="kg"||u==="l"?0.5:1)}
 function guard(p){return Promise.resolve(p).catch(function(){toast("Speichern nicht möglich. Dir fehlt evtl. die Schreibberechtigung.")})}
 
-function setTab(t){tab=t;["dishes","week","shop"].forEach(function(n){$("v-"+n).hidden=n!==t;$("t-"+n).setAttribute("aria-selected",n===t)});render()}
+function setTab(t){tab=t;["dishes","week","shop","home"].forEach(function(n){$("v-"+n).hidden=n!==t;$("t-"+n).setAttribute("aria-selected",n===t)});render()}
 $("t-dishes").onclick=function(){setTab("dishes")};
 $("t-week").onclick=function(){setTab("week")};
 $("t-shop").onclick=function(){setTab("shop")};
+$("t-home").onclick=function(){setTab("home")};
 
 /* Zutaten-Formular */
 function drawIngs(){
@@ -160,6 +180,10 @@ document.addEventListener("click",function(e){
   else if(id=t.getAttribute("data-d")){var dd=dishes.filter(function(x){return x.id===id})[0];if(dd&&confirm("„"+dd.name+"“ löschen?"))guard(db.collection("dishes").doc(id).delete())}
   else if(id=t.getAttribute("data-w2")){setWeek(id,false)}
   else if(id=t.getAttribute("data-m")){guard(db.collection("manual").doc(id).delete())}
+  else if(id=t.getAttribute("data-h")){toPantry(id)}
+  else if(id=t.getAttribute("data-nh")){outPantry(id)}
+  else if(id=t.getAttribute("data-pd")){guard(db.collection("pantry").doc(id).delete())}
+  else if(id=t.getAttribute("data-w3")){setWeek(id,true)}
   else if(id=t.getAttribute("data-s")){var p=id.split("~");adjust(p[0],p[1],+p[2])}
 });
 document.addEventListener("change",function(e){
@@ -179,10 +203,10 @@ function derived(){
       else{map[key]={kind:"d",id:hash(key),key:key,q:q,u:u,n:r.n,src:[d.name]};order.push(key)}
     });
   });
-  return order.map(function(k){var it=map[k],s=ist[it.id]||{};it.delta=s.delta||0;it.checked=!!s.checked;it.eq=Math.max(0,Math.round((it.q+it.delta)*100)/100);return it});
+  return order.map(function(k){var it=map[k],s=ist[it.id]||{};it.delta=s.delta||0;it.checked=!!s.checked;it.home=have(it.n);it.eq=Math.max(0,Math.round((it.q+it.delta)*100)/100);return it});
 }
 function allItems(){
-  var m=manual.map(function(x){return{kind:"m",id:x.id,q:x.q,eq:x.q,u:x.u||"",n:x.name,checked:!!x.checked,src:[]}});
+  var m=manual.map(function(x){return{kind:"m",id:x.id,q:x.q,eq:x.q,u:x.u||"",n:x.name,checked:!!x.checked,home:false,src:[]}});
   return derived().concat(m);
 }
 function adjust(kind,id,dir){
@@ -209,14 +233,14 @@ $("clr").onclick=function(){
 };
 function line(i){return fq(i.eq)+(i.u?" "+i.u:"")+" "+i.n}
 $("cp").onclick=function(){
-  var txt=allItems().filter(function(i){return !i.checked&&i.eq>0}).map(line).join("\n");
+  var txt=allItems().filter(function(i){return !i.checked&&!i.home&&i.eq>0}).map(line).join("\n");
   try{navigator.clipboard.writeText(txt);$("cp").textContent="Kopiert"}catch(e){$("cp").textContent="Nicht möglich"}
   setTimeout(function(){$("cp").textContent="Liste kopieren"},1500)};
 
 function render(){
   var wk=dishes.filter(function(d){return d.week}),items=allItems();
   $("cw").textContent=wk.length;
-  $("cs").textContent=items.filter(function(i){return !i.checked&&i.eq>0}).length;
+  $("cs").textContent=items.filter(function(i){return !i.checked&&!i.home&&i.eq>0}).length;
   var ul=function(d){return (d.ing&&d.ing.length)?'<ul>'+d.ing.map(function(r){return '<li>'+esc((r.q!==null&&r.q!==undefined?fq(r.q)+(r.u?" "+r.u:"")+" ":"")+r.n)+'</li>'}).join("")+'</ul>':'<ul><li>Keine Zutaten</li></ul>'};
   if(tab==="dishes"){
     $("dishlist").innerHTML=dishes.length?dishes.map(function(d){
@@ -231,13 +255,23 @@ function render(){
       :'<div class="empty">Noch nichts geplant. Hake bei „Gerichte“ an, was ihr diese Woche kochen wollt.</div>';
   }
   if(tab==="shop"){
-    $("shoplist").innerHTML=items.length?items.map(function(i){
-      var k=i.kind+"~"+i.id;
+    var rowH=function(i){var k=i.kind+"~"+i.id;
       return '<div class="item'+(i.checked||i.eq<=0?" done":"")+'"><input type="checkbox" aria-label="abhaken" data-c="'+k+'"'+(i.checked?" checked":"")+'>'+
-      '<div class="t"><b>'+esc(i.n)+'</b>'+(i.src.length?'<span class="src">'+esc(i.src.join(", "))+'</span>':'')+'</div>'+
+      '<div class="t"><b>'+esc(i.n)+'</b>'+(i.src.length?'<span class="src">'+esc(i.src.join(", "))+'</span>':'')+(i.kind==="d"?'<button class="lnk" data-h="'+i.id+'">Schon zuhause</button>':'')+'</div>'+
       '<div class="step"><button data-s="'+k+'~-1" aria-label="weniger">−</button><span>'+fq(i.eq)+(i.u?" "+esc(i.u):"")+'</span><button data-s="'+k+'~1" aria-label="mehr">+</button></div>'+
-      (i.kind==="m"?'<button class="x" data-m="'+i.id+'" aria-label="löschen">×</button>':'')+'</div>'}).join("")
-      :'<div class="empty">Die Liste ist leer. Plane Gerichte oder füge oben etwas hinzu.</div>';
+      (i.kind==="m"?'<button class="x" data-m="'+i.id+'" aria-label="löschen">×</button>':'')+'</div>'};
+    var buy=items.filter(function(i){return !i.home}),inh=items.filter(function(i){return i.home});
+    $("shoplist").innerHTML=(buy.length?buy.map(rowH).join(""):'<div class="empty">Die Liste ist leer. Plane Gerichte oder füge oben etwas hinzu.</div>')+
+      (inh.length?'<h2 class="h2">Schon zuhause ('+inh.length+')</h2>'+inh.map(function(i){return '<div class="item done"><div class="t"><b>'+esc(i.n)+'</b><span class="src">'+esc(i.src.join(", "))+'</span></div><button class="btn ghost sm" data-nh="'+i.id+'">Doch kaufen</button></div>'}).join(""):"");
+  }
+  if(tab==="home"){
+    $("pantry").innerHTML=pantry.length?pantry.map(function(p){return '<span class="chip">'+esc(p.name)+'<button class="x" data-pd="'+p.id+'" aria-label="'+esc(p.name)+' entfernen">×</button></span>'}).join(""):'<div class="empty">Noch nichts eingetragen.</div>';
+    var res=dishes.map(function(d){var ing=d.ing||[];var miss=ing.filter(function(r){return !have(r.n)});return{d:d,tot:ing.length,got:ing.length-miss.length,miss:miss}})
+      .filter(function(x){return x.tot>0&&x.got>0}).sort(function(a,b){return a.miss.length-b.miss.length||(b.got/b.tot)-(a.got/a.tot)});
+    $("match").innerHTML=!pantry.length?'<div class="empty">Trag oben ein, was du zuhause hast. Dann siehst du hier, was du damit kochen kannst.</div>'
+      :res.length?res.map(function(x){return '<div class="card dish'+(x.d.week?" on":"")+'"><h3>'+esc(x.d.name)+'</h3><p class="hint">'+x.got+' von '+x.tot+' Zutaten da'+(x.miss.length?'. Es fehlt: '+esc(x.miss.map(function(r){return r.n}).join(", ")):'. Alles da!')+'</p>'+
+        (x.d.week?'<span class="src">Schon in der Woche</span>':'<button class="btn ghost sm" data-w3="'+x.d.id+'" style="margin-top:8px">In die Woche</button>')+'</div>'}).join("")
+      :'<div class="empty">Zu deinem Vorrat passt noch kein gespeichertes Gericht.</div>';
   }
 }
 
@@ -266,6 +300,8 @@ function supaDb(sb){
 }
 
 resetForm();render();
+$("padd").onclick=function(){addPantry($("pi").value);$("pi").value="";$("pi").focus()};
+$("pi").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();$("padd").click()}});
 function sub(col,fn){db.collection(col).onSnapshot(function(s){fn(s);render()})}
 (async function(){
   if(typeof supabase==="undefined"||/^DEINE/.test(SUPABASE_URL)){toast("Supabase ist noch nicht eingetragen (URL und Key oben in der Datei).");return}
@@ -284,6 +320,7 @@ function sub(col,fn){db.collection(col).onSnapshot(function(s){fn(s);render()})}
   sub("dishes",function(s){dishes=s.docs.map(function(d){var x=d.data();return{id:d.id,name:x.name||"",ing:x.ing||[],week:!!x.week}}).sort(function(a,b){return a.name.localeCompare(b.name,"de")})});
   sub("manual",function(s){manual=s.docs.map(function(d){var x=d.data();return{id:d.id,name:x.name||"",q:typeof x.q==="number"?x.q:1,u:x.u||"",checked:!!x.checked}})});
   sub("istate",function(s){ist={};s.docs.forEach(function(d){ist[d.id]=d.data()})});
+  sub("pantry",function(s){pantry=s.docs.map(function(d){return{id:d.id,name:d.data().name||""}}).sort(function(a,b){return a.name.localeCompare(b.name,"de")})});
 })();
 })();
 </script>
