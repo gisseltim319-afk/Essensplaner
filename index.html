@@ -121,6 +121,7 @@ main{max-width:1000px;padding:24px 28px 72px}
 .chp.on{background:var(--btn);color:var(--btn-ink);border-color:var(--btn)}
 .rpt{margin:8px 0 10px}.rpt .src{margin-bottom:6px}
 .rp{color:var(--acc);font-weight:700}
+.rsel{width:100%;max-width:280px}
 .h2{font-size:1.05rem;margin:18px 0 6px;color:var(--mute)}
 .lnk{background:none;border:0;color:var(--acc);font:inherit;font-size:.85rem;padding:4px 0;cursor:pointer;text-decoration:underline}
 .chip{display:inline-flex;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:2px 2px 2px 12px;margin:3px}
@@ -198,6 +199,7 @@ body.out nav,body.out section,body.out .areas{display:none!important}
 <input type="text" id="gi" autocomplete="off">
 <label class="l" for="gn">Notiz (optional)</label>
 <input type="text" id="gn" placeholder="z. B. mit dem Wischmopp" autocomplete="off">
+<div id="groomw"><label class="l" for="groom">Raum</label><select id="groom"></select></div>
 <label class="l">Wiederholt jede Woche am</label>
 <div class="chips" id="gnr"></div>
 <p class="hint">Tage antippen, z. B. nur Dienstag für „jeden Dienstag“. Ohne Auswahl ist der Eintrag einmalig.</p>
@@ -481,7 +483,7 @@ var GM={
   haushalt:{t:"Haushalt",ph:"Neue Aufgabe, z. B. Bad putzen",eL:"Noch keine Aufgaben. F\u00fcge oben die erste hinzu.",eW:"Noch nichts geplant. Hake bei \u201eListe\u201c an, was diese Woche erledigt werden soll."},
   todos:{t:"To-dos",ph:"Neues To-do, z. B. Paket abholen",eL:"Noch keine To-dos. F\u00fcge oben das erste hinzu.",eW:"Noch nichts geplant. Hake bei \u201eListe\u201c an, was diese Woche erledigt werden soll."}
 };
-function mapG(s){return s.docs.map(function(d){var x=d.data();return{id:d.id,title:x.title||"",note:x.note||"",week:!!x.week,done:!!x.done,day:typeof x.day==="number"?x.day:null,repeat:Array.isArray(x.repeat)?x.repeat:[],doneOn:Array.isArray(x.doneOn)?x.doneOn:[]}}).sort(function(a,b){return (a.done-b.done)||a.title.localeCompare(b.title,"de")})}
+function mapG(s){return s.docs.map(function(d){var x=d.data();return{id:d.id,title:x.title||"",note:x.note||"",week:!!x.week,done:!!x.done,day:typeof x.day==="number"?x.day:null,room:typeof x.room==="string"?x.room:"",repeat:Array.isArray(x.repeat)?x.repeat:[],doneOn:Array.isArray(x.doneOn)?x.doneOn:[]}}).sort(function(a,b){return (a.done-b.done)||a.title.localeCompare(b.title,"de")})}
 function setArea(a){
   area=a;
   ["food","haushalt","todos","kalender"].forEach(function(n){$("a-"+n).setAttribute("aria-selected",n===a)});
@@ -497,11 +499,16 @@ $("a-todos").onclick=function(){setArea("todos")};
 $("a-kalender").onclick=function(){setArea("kalender")};
 $("gt-list").onclick=function(){setGTab("list")};
 $("gt-week").onclick=function(){setGTab("week")};
+var ROOMS=["Wohnzimmer","Küche","Flur","Arbeitszimmer","Schlafzimmer","Terrasse"];
+function roomOpts(cur){return '<option value="">Kein Raum</option>'+ROOMS.map(function(r){return '<option'+(cur===r?' selected':'')+'>'+r+'</option>'}).join("")}
+function roomSel(d){return '<select class="rsel" data-rm="'+d.id+'" aria-label="Raum für '+esc(d.title)+'">'+roomOpts(d.room)+'</select>'}
+function subL(d){return [d.room,d.note].filter(Boolean).join(" · ")}
+$("groom").innerHTML=roomOpts("");
 var newRepeat=[];
 function addG(){
   var t=$("gi").value.trim();if(!t){$("gi").focus();return}if(!db)return;
-  guard(db.collection(area).add({title:t,note:$("gn").value.trim(),week:false,day:null,done:false,repeat:newRepeat.slice(),doneOn:[]}));
-  $("gi").value="";$("gn").value="";newRepeat=[];renderG();$("gi").focus()}
+  guard(db.collection(area).add({title:t,note:$("gn").value.trim(),week:false,day:null,done:false,repeat:newRepeat.slice(),doneOn:[],room:area==="haushalt"?$("groom").value:""}));
+  $("gi").value="";$("gn").value="";$("groom").value="";newRepeat=[];renderG();$("gi").focus()}
 $("gadd").onclick=addG;
 ["gi","gn"].forEach(function(i){$(i).addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();addG()}})});
 function upG(id,patch){if(db)guard(db.collection(area).doc(id).update(patch))}
@@ -539,7 +546,8 @@ document.addEventListener("change",function(e){
   if(id=t.getAttribute("data-gw")){upG(id,{week:t.checked,day:null})}
   else if(id=t.getAttribute("data-gc")){upG(id,{done:t.checked})}
   else if(id=t.getAttribute("data-gdd")){setDayIn(area,id,t.value===""?null:+t.value)}
-  else if(id=t.getAttribute("data-gr")){var q=id.split("~");toggleOcc(area,q[0],q[1],t.checked)}});
+  else if(id=t.getAttribute("data-gr")){var q=id.split("~");toggleOcc(area,q[0],q[1],t.checked)}
+  else if(id=t.getAttribute("data-rm")){upG(id,{room:t.value})}});
 function renderG(){
   var m=GM[area],list=G[area],base=list.filter(function(d){return !d.repeat.length}),wk=base.filter(function(d){return d.week});
   $("gtitle").textContent=m.t;$("gi").placeholder=m.ph;$("gclean").hidden=area!=="todos";
@@ -547,16 +555,17 @@ function renderG(){
   for(var q=0;q<7;q++)occFor(list,q).forEach(function(o){if(o.rec&&!o.done)open++});
   $("gcw").textContent=open;
   $("gnr").innerHTML=chips(newRepeat,"data-nr","");
+  $("groomw").hidden=area!=="haushalt";
   if(gtab==="list"){
     $("glist").innerHTML=list.length?list.map(function(d){var rec=d.repeat.length>0;
       return '<div class="card dish'+(d.week&&!rec?" on":"")+'"><h3'+(d.done&&!rec?' style="text-decoration:line-through;color:var(--mute)"':'')+'>'+esc(d.title)+'</h3>'+(d.note?'<p class="hint">'+esc(d.note)+'</p>':'')+
-      '<div class="rpt"><span class="src">Wiederholt jede Woche am</span><div class="chips">'+chips(d.repeat,"data-rp",d.id+"~")+'</div></div>'+
+      (area==="haushalt"?'<div class="rpt"><span class="src">Raum</span>'+roomSel(d)+'</div>':'')+'<div class="rpt"><span class="src">Wiederholt jede Woche am</span><div class="chips">'+chips(d.repeat,"data-rp",d.id+"~")+'</div></div>'+
       '<div class="row">'+(rec?'<span class="hint grow">Erscheint automatisch in jeder Woche.</span>':'<label class="pick"><input type="checkbox" data-gw="'+d.id+'"'+(d.week?" checked":"")+'>Diese Woche</label><span class="grow"></span>')+'<button class="x" data-gx="'+d.id+'" aria-label="'+esc(d.title)+' l\u00f6schen">\u00d7</button></div></div>'}).join("")
       :'<div class="empty">'+m.eL+'</div>';
   }else{
     var dsel=function(d){return '<select class="dsel" data-gdd="'+d.id+'" aria-label="Tag f\u00fcr '+esc(d.title)+'"><option value="">Tag</option>'+DAYS.map(function(n,i){return '<option value="'+i+'"'+(d.day===i?" selected":"")+'>'+n.slice(0,2)+'</option>'}).join("")+'</select>'};
     var row=function(o){var d=o.d;
-      return '<div class="wd'+(o.done?" done":"")+'"><input type="checkbox" '+(o.rec?'data-gr="'+d.id+'~'+o.k+'"':'data-gc="'+d.id+'"')+(o.done?" checked":"")+' aria-label="erledigt"><span class="grow nm">'+(o.rec?'<span class="rp" title="wiederkehrend">\u21bb</span> ':'')+esc(d.title)+(d.note?'<span class="src">'+esc(d.note)+'</span>':'')+'</span>'+
+      return '<div class="wd'+(o.done?" done":"")+'"><input type="checkbox" '+(o.rec?'data-gr="'+d.id+'~'+o.k+'"':'data-gc="'+d.id+'"')+(o.done?" checked":"")+' aria-label="erledigt"><span class="grow nm">'+(o.rec?'<span class="rp" title="wiederkehrend">\u21bb</span> ':'')+esc(d.title)+(subL(d)?'<span class="src">'+esc(subL(d))+'</span>':'')+'</span>'+
       (o.rec?'':dsel(d)+'<span class="handle" data-drag="'+d.id+'" data-col="'+area+'" role="img" aria-label="Verschieben">\u283f</span><button class="x" data-gw2="'+d.id+'" aria-label="'+esc(d.title)+' aus der Woche entfernen">\u00d7</button>')+'</div>'};
     var pool=wk.filter(function(d){return d.day===null}),anyRec=list.some(function(d){return d.repeat.length});
     var h=weekBar()+'<div class="card pool" data-dropday="-1"><strong>Noch ohne Tag</strong>'+(pool.length?pool.map(function(d){return row({d:d,done:d.done,rec:false})}).join(""):'<p class="hint">'+(wk.length?'Alles hat einen Tag.':(anyRec?'Keine Eintr\u00e4ge ohne Tag.':m.eW))+'</p>')+'</div>';
@@ -592,7 +601,7 @@ function renderCal(){
     if(pp.mode==="out")h2+=sec("Essen","Essen gehen"+(pp.note?": "+esc(pp.note):""));
     else if(pp.mode==="order")h2+=sec("Essen","Bestellen"+(pp.note?": "+esc(pp.note):""));
     else if(pp.ds.length)h2+=sec("Essen",pp.ds.map(function(d){return '<div class="pli">'+esc(d.name)+'</div>'}).join(""));
-    var chk=function(col){return function(o){var d=o.d;return '<label class="pli pick"><input type="checkbox" '+(o.rec?'data-cr="'+col+'~'+d.id+'~'+o.k+'"':'data-cg="'+col+'~'+d.id+'"')+(o.done?" checked":"")+'><span'+(o.done?' style="text-decoration:line-through;color:var(--mute)"':'')+'>'+(o.rec?'<span class="rp">\u21bb</span> ':'')+esc(d.title)+'</span></label>'}};
+    var chk=function(col){return function(o){var d=o.d;return '<label class="pli pick"><input type="checkbox" '+(o.rec?'data-cr="'+col+'~'+d.id+'~'+o.k+'"':'data-cg="'+col+'~'+d.id+'"')+(o.done?" checked":"")+'><span'+(o.done?' style="text-decoration:line-through;color:var(--mute)"':'')+'>'+(o.rec?'<span class="rp">\u21bb</span> ':'')+esc(d.title)+(d.room?' <span class="dt">'+esc(d.room)+'</span>':'')+'</span></label>'}};
     if(pp.hs.length)h2+=sec("Haushalt",pp.hs.map(chk("haushalt")).join(""));
     if(pp.ts.length)h2+=sec("To-dos",pp.ts.map(chk("todos")).join(""));
     pl.innerHTML='<strong>Plan f\u00fcr diesen Tag</strong>'+(h2||'<p class="hint">Nichts geplant.</p>');pl.hidden=false}
